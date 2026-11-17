@@ -110,3 +110,17 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+// getprocs(struct pinfo *buf, int max)
+// copy information about at most max non-UNUSED processes to buf.
+// returns the number of entries written, or -1 on invalid arguments.
+uint64
+sys_getprocs(void)
+{
+  uint64 buf;
+  int max;
+
+  argaddr(0, &buf);
+  argint(1, &max);
+  return getprocs(buf, max);
+}

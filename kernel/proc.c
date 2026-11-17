@@ -4,6 +4,7 @@
 #include "riscv.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "pinfo.h"
 #include "defs.h"
 
 struct cpu cpus[NCPU];
@@ -700,4 +701,57 @@ procdump(void)
     printk("%d %s %s", p->pid, state, p->name);
     printk("\n");
   }
+}
+
+// Copy information about at most max non-UNUSED processes
+// to the user buffer at addr. Return the number of entries
+// written, or -1 if the arguments are invalid or copyout fails.
+int
+getprocs(uint64 addr, int max)
+{
+  struct proc *p;
+  struct pinfo *info;
+  int n = 0;
+
+  if (addr == 0 || max < 0)
+    return -1;
+  if (max == 0)
+    return 0;
+  if (max > NPROC)
+    max = NPROC;
+
+  // the kernel stack is only one page, so collect into a
+  // kalloc()ed page instead of a local array.
+  if (NPROC * sizeof(struct pinfo) > PGSIZE)
+    panic("getprocs: pinfo buffer");
+  if ((info = (struct pinfo *)kalloc()) == 0)
+    return -1;
+
+  // same lock order as kwait(): wait_lock, then p->lock.
+  // wait_lock protects p->parent and keeps the parent from
+  // being freed while we read its pid.
+  acquire(&wait_lock);
+  for (p = proc; p < &proc[NPROC] && n < max; p++) {
+    acquire(&p->lock);
+    if (p->state != UNUSED) {
+      info[n].pid = p->pid;
+      info[n].ppid = p->parent ? p->parent->pid : 0;
+      info[n].state = p->state;
+      info[n].sz = p->sz;
+      safestrcpy(info[n].name, p->name, sizeof(info[n].name));
+      n++;
+    }
+    release(&p->lock);
+  }
+  release(&wait_lock);
+
+  // copyout may sleep/fault in pages, so it is called
+  // only after all locks are released.
+  struct proc *me = myproc();
+  if (copyout(me->pagetable, me->sz, addr, (char *)info,
+              n * sizeof(struct pinfo)) < 0)
+    n = -1;
+
+  kfree((void *)info);
+  return n;
 }
