@@ -35,6 +35,33 @@ struct spinlock sched_lock;
 // so the next RR choice continues after it.
 static int rr_last = -1;
 
+// CFS: nice -> weight (the Linux table; each step is about x1.25).
+static const int nice_to_weight[NICE_MAX - NICE_MIN + 1] = {
+  /* -20 */ 88761, 71755, 56483, 46273, 36291,
+  /* -15 */ 29154, 23254, 18705, 14949, 11916,
+  /* -10 */ 9548,  7620,  6100,  4904,  3906,
+  /*  -5 */ 3121,  2501,  1991,  1586,  1277,
+  /*   0 */ 1024,  820,   655,   526,   423,
+  /*   5 */ 335,   272,   215,   172,   137,
+  /*  10 */ 110,   87,    70,    56,    45,
+  /*  15 */ 36,    29,    23,    18,    15,
+};
+
+// CFS: smallest vruntime among RUNNABLE/RUNNING processes, updated
+// by the scheduler and never decreasing (like Linux). Written under
+// sched_lock; read without it (an aligned 64-bit load is atomic).
+static uint64 min_vruntime;
+
+// a new or woken process starts no earlier than min_vruntime, so
+// it cannot monopolise the CPU. caller holds p->lock.
+static void
+place_vruntime(struct proc *p)
+{
+  uint64 min = __atomic_load_n(&min_vruntime, __ATOMIC_RELAXED);
+  if (p->vruntime < min)
+    p->vruntime = min;
+}
+
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
 // guard page.
@@ -143,6 +170,10 @@ found:
   p->burst = DEFAULT_BURST;
   p->confidence = DEFAULT_CONF;
   p->qticks = 0;
+  p->nice = 0;
+  p->weight = NICE_0_WEIGHT;
+  p->vruntime = 0;
+  p->slice = 0;
 
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0) {
@@ -314,6 +345,7 @@ kfork(void)
   if (p == initproc)
     np->queue = 1;
   np->qtick = ticks;
+  place_vruntime(np);
 
   pid = np->pid;
 
@@ -469,14 +501,65 @@ lcg_rand(void)
   return (uint)(lcg_state >> 32);
 }
 
+#ifdef CFS
+// CFS: choose the RUNNABLE process with the smallest vruntime (tie ->
+// lower pid) and set its slice = max(min_gran, L * w / sum of weights)
+// over RUNNABLE and RUNNING processes. Return it locked, or 0.
+// Caller must hold sched_lock.
+static struct proc *
+cfs_pick(void)
+{
+  struct proc *p, *best = 0;
+  uint64 best_vrt = 0, min = 0, totalw = 0;
+  int best_pid = 0, any = 0, w = 0;
+
+  for (p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if (p->state == RUNNABLE || p->state == RUNNING) {
+      totalw += p->weight;
+      if (!any || p->vruntime < min)
+        min = p->vruntime;
+      any = 1;
+      if (p->state == RUNNABLE &&
+          (best == 0 || p->vruntime < best_vrt ||
+           (p->vruntime == best_vrt && p->pid < best_pid))) {
+        best = p;
+        best_vrt = p->vruntime;
+        best_pid = p->pid;
+        w = p->weight;
+      }
+    }
+    release(&p->lock);
+  }
+
+  if (any && min > min_vruntime)
+    __atomic_store_n(&min_vruntime, min, __ATOMIC_RELAXED);
+  if (best == 0)
+    return 0;
+
+  acquire(&best->lock);
+  if (best->state != RUNNABLE) {
+    release(&best->lock);
+    return 0;
+  }
+  uint64 slice = (uint64)CFS_PERIOD * w / totalw;
+  best->slice = slice < CFS_MIN_GRAN ? CFS_MIN_GRAN : (int)slice;
+  return best;
+}
+#endif
+
 // Choose the next process to run and return it locked, or 0 if
 // nothing is RUNNABLE. Caller must hold sched_lock.
+// CFS: see cfs_pick().
 // MLFQ: the highest queue with a RUNNABLE process wins;
 //   queue 1 round robin, queue 2 approximate SJF, queue 3 FCFS.
 // RR: every process is treated as queue 1 (plain round robin).
 static struct proc *
 pick(void)
 {
+#ifdef CFS
+  return cfs_pick();
+#endif
   struct proc *p, *rr = 0, *fcfs = 0;
   int rrdist = NPROC, n = 0, i, q, idx, d;
   uint fcfs_tick = 0;
@@ -721,6 +804,7 @@ wakeup(void *chan)
       if (p->state == SLEEPING) {
         p->state = RUNNABLE;
         p->qtick = ticks; // re-entered its queue (FCFS order)
+        place_vruntime(p);
       }
     }
     release(&p->lock);
@@ -746,6 +830,7 @@ kkill(int pid)
         // Wake process from sleep().
         p->state = RUNNABLE;
         p->qtick = ticks;
+        place_vruntime(p);
       }
       release(&p->lock);
       return 0;
@@ -831,7 +916,8 @@ procdump(void)
       state = states[p->state];
     else
       state = "???";
-    printk("%d %s %s", p->pid, state, p->name);
+    printk("%d %s %s nice %d vruntime %lu", p->pid, state, p->name,
+           p->nice, p->vruntime);
     printk("\n");
   }
 }
@@ -903,8 +989,13 @@ sched_clock(int cpu0)
 
   if (p) {
     acquire(&p->lock);
-    if (p->state == RUNNING)
+    if (p->state == RUNNING) {
       p->qticks++;
+#ifdef CFS
+      // delta t = 1 tick: vruntime += 1 * 1024 / w (scaled by 1000)
+      p->vruntime += (uint64)VRT_SCALE * NICE_0_WEIGHT / p->weight;
+#endif
+    }
 #ifdef SCHED_TRACE
     int pid = p->pid, q = p->queue, run = p->qticks;
     release(&p->lock);
@@ -943,12 +1034,19 @@ sched_preempt(void)
   struct proc *p = myproc();
   int q, ran;
 
+  int slice;
+
   acquire(&p->lock);
   q = p->queue;
   ran = p->qticks;
+  slice = p->slice;
   release(&p->lock);
 
-#ifdef MLFQ
+#ifdef CFS
+  (void)q;
+  return ran >= slice; // slice used up
+#elif defined(MLFQ)
+  (void)slice;
   if (q == 1)
     return ran >= RR_QUANTUM;
   if (q == 2 && ran >= SJF_SLICE)
@@ -968,6 +1066,7 @@ sched_preempt(void)
   return higher;
 #else
   (void)q;
+  (void)slice;
   return ran >= RR_QUANTUM;
 #endif
 }
@@ -986,6 +1085,28 @@ setburst(int pid, int burst, int confidence)
     if (p->pid == pid && p->state != UNUSED) {
       p->burst = burst;
       p->confidence = confidence;
+      release(&p->lock);
+      return 0;
+    }
+    release(&p->lock);
+  }
+  return -1;
+}
+
+// Set the nice value (and so the CFS weight) of process pid.
+// Return 0, or -1 if pid does not exist or nice is out of range.
+int
+setnice(int pid, int nice)
+{
+  struct proc *p;
+
+  if (nice < NICE_MIN || nice > NICE_MAX)
+    return -1;
+  for (p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if (p->pid == pid && p->state != UNUSED) {
+      p->nice = nice;
+      p->weight = nice_to_weight[nice - NICE_MIN];
       release(&p->lock);
       return 0;
     }

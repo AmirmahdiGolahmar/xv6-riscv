@@ -137,3 +137,15 @@ sys_setburst(void)
   argint(2, &confidence);
   return setburst(pid, burst, confidence);
 }
+
+// setnice(int pid, int nice)
+// set the nice value (-20..19) of a process; 0 or -1.
+uint64
+sys_setnice(void)
+{
+  int pid, nice;
+
+  argint(0, &pid);
+  argint(1, &nice);
+  return setnice(pid, nice);
+}

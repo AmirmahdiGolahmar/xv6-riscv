@@ -20,3 +20,11 @@
 #define AGING_THRESHOLD 800 // RUNNABLE ticks before promotion to the next queue
 #define DEFAULT_BURST   2   // default SJF burst estimate
 #define DEFAULT_CONF    50  // default SJF confidence (0..100)
+
+// CFS (Part 3)
+#define CFS_PERIOD      12   // scheduling period L, ticks
+#define CFS_MIN_GRAN    2    // minimum slice, ticks
+#define NICE_MIN        (-20)
+#define NICE_MAX        19
+#define NICE_0_WEIGHT   1024
+#define VRT_SCALE       1000 // vruntime is kept in 1/1000 tick

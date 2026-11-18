@@ -107,6 +107,7 @@ int             getprocs(uint64, int);
 void            sched_clock(int);
 int             sched_preempt(void);
 int             setburst(int, int, int);
+int             setnice(int, int);
 
 // swtch.S
 void            swtch(struct context*, struct context*);

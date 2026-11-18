@@ -89,11 +89,11 @@ ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]nopie'),)
 CFLAGS += -fno-pie -nopie
 endif
 
-# scheduler selection: make qemu SCHEDULER=RR|MLFQ
+# scheduler selection: make qemu SCHEDULER=RR|MLFQ|CFS
 # (run "make clean" after changing it)
 SCHEDULER ?= RR
-ifeq ($(filter $(SCHEDULER),RR MLFQ),)
-$(error SCHEDULER must be RR or MLFQ)
+ifeq ($(filter $(SCHEDULER),RR MLFQ CFS),)
+$(error SCHEDULER must be RR, MLFQ or CFS)
 endif
 CFLAGS += -D$(SCHEDULER)
 
@@ -168,6 +168,7 @@ UPROGS=\
 	$U/_ps\
 	$U/_pstest\
 	$U/_mlfqtest\
+	$U/_cfstest\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

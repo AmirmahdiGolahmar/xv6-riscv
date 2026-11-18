@@ -97,6 +97,12 @@ struct proc {
   int confidence; // SJF confidence 0..100
   int qticks;     // ticks run since it was last scheduled
 
+  // CFS (Part 3)
+  int nice;        // -20..19, lower = more important
+  int weight;      // from nice; nice 0 = 1024
+  uint64 vruntime; // virtual runtime, in 1/VRT_SCALE ticks
+  int slice;       // ticks this turn may run (set when scheduled)
+
   // wait_lock must be held when using this:
   struct proc *parent; // Parent process
 
