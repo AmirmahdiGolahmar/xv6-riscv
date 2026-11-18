@@ -89,6 +89,20 @@ ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]nopie'),)
 CFLAGS += -fno-pie -nopie
 endif
 
+# scheduler selection: make qemu SCHEDULER=RR|MLFQ
+# (run "make clean" after changing it)
+SCHEDULER ?= RR
+ifeq ($(filter $(SCHEDULER),RR MLFQ),)
+$(error SCHEDULER must be RR or MLFQ)
+endif
+CFLAGS += -D$(SCHEDULER)
+
+# SCHED_TRACE=1 prints the running pid and its slice length
+# on every timer interrupt (for checking the RR quantum).
+ifeq ($(SCHED_TRACE),1)
+CFLAGS += -DSCHED_TRACE
+endif
+
 LDFLAGS = -z max-page-size=4096
 
 $K/kernel: $(OBJS) $K/kernel.ld
@@ -153,6 +167,7 @@ UPROGS=\
 	$U/_sync\
 	$U/_ps\
 	$U/_pstest\
+	$U/_mlfqtest\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

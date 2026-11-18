@@ -124,3 +124,16 @@ sys_getprocs(void)
   argint(1, &max);
   return getprocs(buf, max);
 }
+
+// setburst(int pid, int burst, int confidence)
+// set the SJF burst estimate and confidence (0..100) of a process.
+uint64
+sys_setburst(void)
+{
+  int pid, burst, confidence;
+
+  argint(0, &pid);
+  argint(1, &burst);
+  argint(2, &confidence);
+  return setburst(pid, burst, confidence);
+}

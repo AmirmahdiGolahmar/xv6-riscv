@@ -48,7 +48,7 @@ main(int argc, char *argv[])
     exit(1);
   }
 
-  printf("PID  PPID  STATE     SIZE   NAME\n");
+  printf("PID  PPID  STATE     SIZE   Q  WAIT  BURST  CONF  NAME\n");
   for (i = 0; i < n; i++) {
     if (procs[i].state >= 0 && procs[i].state < sizeof(states) / sizeof(states[0]))
       st = states[procs[i].state];
@@ -58,6 +58,10 @@ main(int argc, char *argv[])
     padint(procs[i].ppid, 6);
     pad(st, 10);
     padint(procs[i].sz, 7);
+    padint(procs[i].queue, 3);
+    padint(procs[i].wait, 6);
+    padint(procs[i].burst, 7);
+    padint(procs[i].confidence, 6);
     printf("%s\n", procs[i].name);
   }
   exit(0);

@@ -81,8 +81,9 @@ usertrap(void)
   if (killed(p))
     kexit(-1);
 
-  // give up the CPU if this is a timer interrupt.
-  if (which_dev == 2)
+  // give up the CPU if this is a timer interrupt and
+  // the scheduling policy says so (see sched_preempt()).
+  if (which_dev == 2 && sched_preempt())
     yield();
 
   prepare_return();
@@ -154,7 +155,7 @@ kerneltrap()
   }
 
   // give up the CPU if this is a timer interrupt.
-  if (which_dev == 2 && myproc() != 0)
+  if (which_dev == 2 && myproc() != 0 && sched_preempt())
     yield();
 
   // the yield() may have caused some traps to occur,
@@ -166,12 +167,17 @@ kerneltrap()
 void
 clockintr()
 {
-  if (cpuid() == 0) {
+  int cpu0 = cpuid() == 0;
+
+  if (cpu0) {
     acquire(&tickslock);
     ticks++;
     wakeup(&ticks);
     release(&tickslock);
   }
+
+  // slice ticks, waiting time and aging.
+  sched_clock(cpu0);
 
   // ask for the next timer interrupt. this also clears
   // the interrupt request. 1000000 is about a tenth

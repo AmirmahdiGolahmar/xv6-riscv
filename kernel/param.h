@@ -12,3 +12,11 @@
 #define FSSIZE      2000              // size of file system in blocks
 #define MAXPATH     128               // maximum file path name
 #define USERSTACK   1                 // user stack pages
+
+// scheduling (Part 2)
+#define NQUEUE          3   // MLFQ queues: 1 = RR (highest), 2 = SJF, 3 = FCFS
+#define RR_QUANTUM      5   // ticks a queue-1 (or RR-mode) process may run
+#define SJF_SLICE       1   // ticks between SJF decisions in queue 2
+#define AGING_THRESHOLD 800 // RUNNABLE ticks before promotion to the next queue
+#define DEFAULT_BURST   2   // default SJF burst estimate
+#define DEFAULT_CONF    50  // default SJF confidence (0..100)

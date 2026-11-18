@@ -89,6 +89,14 @@ struct proc {
   int xstate;           // Exit status to be returned to parent's wait
   int pid;              // Process ID
 
+  // scheduling state (Part 2)
+  int queue;      // MLFQ queue: 1 = RR (highest), 2 = SJF, 3 = FCFS
+  uint qtick;     // tick when it last entered its queue (FCFS order)
+  int wait;       // ticks RUNNABLE since it last ran / was promoted
+  int burst;      // SJF burst estimate
+  int confidence; // SJF confidence 0..100
+  int qticks;     // ticks run since it was last scheduled
+
   // wait_lock must be held when using this:
   struct proc *parent; // Parent process
 

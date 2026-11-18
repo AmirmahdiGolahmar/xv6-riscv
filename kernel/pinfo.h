@@ -9,4 +9,8 @@ struct pinfo {
   int state;
   uint64 sz;
   char name[16];
+  int queue;      // MLFQ queue (1..3)
+  int wait;       // ticks waited while RUNNABLE
+  int burst;      // SJF burst estimate
+  int confidence; // SJF confidence
 };
